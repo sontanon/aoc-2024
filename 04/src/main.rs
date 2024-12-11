@@ -26,12 +26,22 @@ fn exercise_1(input_string: &str) -> Result<usize, Box<dyn std::error::Error>> {
         .map(|i| rows.iter().map(|row| row[i]).collect())
         .collect();
 
-    let diags: Vec<Vec<char>> = (0..2 * n - 1)
+    let diags_left_right: Vec<Vec<char>> = (0..2 * n - 1)
         .map(|k| -> Vec<char> {
             let left_bound = usize::max(0, usize::saturating_sub(n, k + 1));
             let right_bound = usize::min(n, 2 * n - (1 + k));
             (left_bound..right_bound)
                 .map(|i| -> char { rows[i][(i + k + 1) - n] })
+                .collect()
+        })
+        .collect();
+
+    let diags_right_left: Vec<Vec<char>> = (0..2 * n - 1)
+        .map(|k| -> Vec<char> {
+            let left_bound = usize::max(0, usize::saturating_sub(n, k + 1));
+            let right_bound = usize::min(n, 2 * n - (1 + k));
+            (left_bound..right_bound)
+                .map(|i| -> char { rows[i][2 * (n - 1) - (i + k)] })
                 .collect()
         })
         .collect();
@@ -46,7 +56,12 @@ fn exercise_1(input_string: &str) -> Result<usize, Box<dyn std::error::Error>> {
         .map(|v_c| -> String { v_c.iter().collect() })
         .collect();
 
-    let diags: Vec<String> = diags
+    let diags_left_right: Vec<String> = diags_left_right
+        .into_iter()
+        .map(|v_c| -> String { v_c.iter().collect() })
+        .collect();
+
+    let diags_right_left: Vec<String> = diags_right_left
         .into_iter()
         .map(|v_c| -> String { v_c.iter().collect() })
         .collect();
@@ -59,12 +74,16 @@ fn exercise_1(input_string: &str) -> Result<usize, Box<dyn std::error::Error>> {
         .iter()
         .map(|col| count_occurrences(col))
         .sum();
-    let diag_counts: usize = diags
+    let diag_left_right_counts: usize = diags_left_right
+        .iter()
+        .map(|diag| count_occurrences(diag))
+        .sum();
+    let diag_right_left_counts: usize = diags_right_left
         .iter()
         .map(|diag| count_occurrences(diag))
         .sum();
 
-    Ok(row_counts + col_counts + diag_counts)
+    Ok(row_counts + col_counts + diag_left_right_counts + diag_right_left_counts)
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
