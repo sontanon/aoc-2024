@@ -1,3 +1,4 @@
+use anyhow::{ensure, Result};
 use regex::Regex;
 use std::{fs, path::Path};
 
@@ -54,11 +55,14 @@ const FILTER_4: [[[u8; 3]; 3]; 3] = [
     [[0, 0, 1], [0, 0, 0], [1, 0, 0]],
 ];
 
-fn convolve(matrix: &Vec<Vec<[u8; 3]>>, filter: &[[[u8; 3]; 3]; 3]) -> Vec<Vec<bool>> {
+fn convolve(matrix: &[Vec<[u8; 3]>], filter: &[[[u8; 3]; 3]; 3]) -> Result<Vec<Vec<bool>>> {
     let n_rows = matrix.len();
     let n_cols = matrix[0].len();
 
-    (1..n_rows - 1)
+    ensure!(n_rows >= 3, "Matrix must have at least 3 rows");
+    ensure!(n_cols >= 3, "Matrix must have at least 3 columns");
+
+    Ok((1..n_rows - 1)
         .map(|i| -> Vec<bool> {
             (1..n_cols - 1)
                 .map(|j| -> bool {
@@ -74,20 +78,20 @@ fn convolve(matrix: &Vec<Vec<[u8; 3]>>, filter: &[[[u8; 3]; 3]; 3]) -> Vec<Vec<b
                 })
                 .collect()
         })
-        .collect()
+        .collect())
 }
 
-fn exercise_2(input_string: &str) -> Result<usize, Box<dyn std::error::Error>> {
+fn exercise_2(input_string: &str) -> Result<usize> {
     let matrix: Vec<Vec<[u8; 3]>> = input_string
         .split("\n")
         .filter(|&row| !row.is_empty())
-        .map(|row| -> Vec<[u8; 3]> { row.chars().map(|c| char_to_array(c)).collect() })
+        .map(|row| -> Vec<[u8; 3]> { row.chars().map(char_to_array).collect() })
         .collect();
 
-    let convolution_1 = convolve(&matrix, &FILTER_1);
-    let convolution_2 = convolve(&matrix, &FILTER_2);
-    let convolution_3 = convolve(&matrix, &FILTER_3);
-    let convolution_4 = convolve(&matrix, &FILTER_4);
+    let convolution_1 = convolve(&matrix, &FILTER_1)?;
+    let convolution_2 = convolve(&matrix, &FILTER_2)?;
+    let convolution_3 = convolve(&matrix, &FILTER_3)?;
+    let convolution_4 = convolve(&matrix, &FILTER_4)?;
 
     let sum = convolution_1
         .iter()
@@ -109,7 +113,7 @@ fn exercise_2(input_string: &str) -> Result<usize, Box<dyn std::error::Error>> {
     Ok(sum)
 }
 
-fn exercise_1(input_string: &str) -> Result<usize, Box<dyn std::error::Error>> {
+fn exercise_1(input_string: &str) -> Result<usize> {
     let rows: Vec<Vec<char>> = input_string
         .split("\n")
         .filter(|&row| !row.is_empty())
@@ -119,8 +123,8 @@ fn exercise_1(input_string: &str) -> Result<usize, Box<dyn std::error::Error>> {
     let n_rows = rows.len();
     let n_cols = rows[0].len();
 
-    assert_eq!(n_rows, n_cols);
-    assert!(rows.iter().all(|row| row.len() == n_cols));
+    ensure!(n_rows == n_cols, "Matrix must be square");
+    ensure!(rows.iter().all(|row| row.len() == n_cols), "All rows must have the same length");
     let n = n_rows;
 
     let cols: Vec<Vec<char>> = (0..n)
@@ -181,7 +185,7 @@ fn exercise_1(input_string: &str) -> Result<usize, Box<dyn std::error::Error>> {
     Ok(row_counts + col_counts + diag_left_right_counts + diag_right_left_counts)
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<()> {
     let input_string = fs::read_to_string(Path::new("input.txt"))?;
 
     let sum_1 = exercise_1(&input_string)?;
