@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use std::{any, collections::{btree_map::Keys, HashMap}, fs, path::Path};
+use std::{collections::HashMap, fs};
 
 fn main() -> Result<()> {
     let input_string = fs::read_to_string("input.txt")?;
@@ -27,10 +27,10 @@ fn main() -> Result<()> {
         )
         .collect();
 
-    let mut after_rules = rules?
+    let mut after_rules: HashMap<usize, Vec<usize>> = rules?
         .iter()
         .fold(HashMap::new(), |mut map, (x, y)| {
-            map.entry(*x).or_insert(Vec::new()).push(*y);
+            map.entry(*x).or_default().push(*y);
             map
         });
     after_rules.values_mut().for_each(|v| v.sort_unstable());
