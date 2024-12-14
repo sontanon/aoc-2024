@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result, ensure};
+use anyhow::{anyhow, ensure, Result};
 use std::{collections::HashSet, fmt::Display, fs};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -70,7 +70,12 @@ impl Display for Maze {
 
 fn preprocessing(input_string: &str) -> Result<Maze> {
     let num_rows = input_string.lines().count();
-    let num_cols = input_string.lines().next().ok_or_else(|| anyhow!("Input must contain at least one row."))?.chars().count();
+    let num_cols = input_string
+        .lines()
+        .next()
+        .ok_or_else(|| anyhow!("Input must contain at least one row."))?
+        .chars()
+        .count();
 
     ensure!(
         num_rows > 0 && num_cols > 0,
@@ -128,11 +133,20 @@ fn preprocessing(input_string: &str) -> Result<Maze> {
 #[derive(Debug, Clone)]
 enum GuardMove {
     TurnRight,
-    MoveForward(usize, usize),
+    MoveForward, // (usize, usize),
     ExitMaze,
 }
 
-
+impl Orientation {
+    fn turn_right(&self) -> Self {
+        match self {
+            Orientation::North => Orientation::East,
+            Orientation::East => Orientation::South,
+            Orientation::South => Orientation::West,
+            Orientation::West => Orientation::North,
+        }
+    }
+}
 
 impl Maze {
     fn move_guard(&mut self) -> GuardMove {
@@ -143,11 +157,14 @@ impl Maze {
                     return GuardMove::ExitMaze;
                 }
                 match self.cells[y - 1][x] {
-                    MazeCell::Obstacle => GuardMove::TurnRight,
+                    MazeCell::Obstacle => {
+                        self.guard.orientation = self.guard.orientation.turn_right();
+                        GuardMove::TurnRight
+                    }
                     MazeCell::Empty => {
                         self.guard.y -= 1;
                         self.visited_locations.insert((x, y - 1));
-                        GuardMove::MoveForward(x, y - 1)
+                        GuardMove::MoveForward
                     }
                 }
             }
@@ -156,11 +173,14 @@ impl Maze {
                     return GuardMove::ExitMaze;
                 }
                 match self.cells[y][x + 1] {
-                    MazeCell::Obstacle => GuardMove::TurnRight,
+                    MazeCell::Obstacle => {
+                        self.guard.orientation = self.guard.orientation.turn_right();
+                        GuardMove::TurnRight
+                    }
                     MazeCell::Empty => {
                         self.guard.x += 1;
                         self.visited_locations.insert((x + 1, y));
-                        GuardMove::MoveForward(x + 1, y)
+                        GuardMove::MoveForward
                     }
                 }
             }
@@ -169,11 +189,14 @@ impl Maze {
                     return GuardMove::ExitMaze;
                 }
                 match self.cells[y + 1][x] {
-                    MazeCell::Obstacle => GuardMove::TurnRight,
+                    MazeCell::Obstacle => {
+                        self.guard.orientation = self.guard.orientation.turn_right();
+                        GuardMove::TurnRight
+                    }
                     MazeCell::Empty => {
                         self.guard.y += 1;
                         self.visited_locations.insert((x, y + 1));
-                        GuardMove::MoveForward(x, y + 1)
+                        GuardMove::MoveForward
                     }
                 }
             }
@@ -182,53 +205,41 @@ impl Maze {
                     return GuardMove::ExitMaze;
                 }
                 match self.cells[y][x - 1] {
-                    MazeCell::Obstacle => GuardMove::TurnRight,
+                    MazeCell::Obstacle => {
+                        self.guard.orientation = self.guard.orientation.turn_right();
+                        GuardMove::TurnRight
+                    }
                     MazeCell::Empty => {
                         self.guard.x -= 1;
                         self.visited_locations.insert((x - 1, y));
-                        GuardMove::MoveForward(x - 1, y)
+                        GuardMove::MoveForward
                     }
                 }
             }
         }
-
     }
-
 }
 
 fn exercise_1(maze: &mut Maze) -> usize {
-    loop {
-        let mv = maze.move_guard();
-        match mv {
-            GuardMove::TurnRight => {
-                match maze.guard.orientation {
-                    Orientation::North => maze.guard.orientation = Orientation::East,
-                    Orientation::East => maze.guard.orientation = Orientation::South,
-                    Orientation::South => maze.guard.orientation = Orientation::West,
-                    Orientation::West => maze.guard.orientation = Orientation::North,
-                }
-            }
-            GuardMove::MoveForward(_x, _y) => {
-                // println!("Guard moved to ({}, {})", x, y);
-            }
-            GuardMove::ExitMaze => {
-                println!("Guard exited the maze.");
-                break;
-            }
-        }
-    }
-
+    while let GuardMove::TurnRight | GuardMove::MoveForward = maze.move_guard() {}
     maze.visited_locations.len()
 }
 
-fn restore_maze(maze: &mut Maze, starting_pos: (usize, usize, Orientation), old_obstacle: (usize, usize)) {
+fn restore_maze(
+    maze: &mut Maze,
+    starting_pos: (usize, usize, Orientation),
+    old_obstacle: (usize, usize),
+) {
     maze.guard.x = starting_pos.0;
     maze.guard.y = starting_pos.1;
     maze.guard.orientation = starting_pos.2;
     maze.cells[old_obstacle.1][old_obstacle.0] = MazeCell::Empty;
 }
 
-fn break_condition(maze: &Maze, visited_locations_and_orientations: &HashSet<(usize, usize, Orientation)>) -> bool {
+fn break_condition(
+    maze: &Maze,
+    visited_locations_and_orientations: &HashSet<(usize, usize, Orientation)>,
+) -> bool {
     let (x, y, orientation) = (maze.guard.x, maze.guard.y, maze.guard.orientation);
     visited_locations_and_orientations.contains(&(x, y, orientation))
 }
@@ -248,45 +259,32 @@ fn exercise_2(maze: &mut Maze) -> usize {
             if maze.cells[y][x] == MazeCell::Obstacle {
                 continue;
             }
+            // Place the obstacle in the proposed location.
             maze.cells[y][x] = MazeCell::Obstacle;
 
-            let mut visited_locations_and_orientations: HashSet<(usize, usize, Orientation)> = HashSet::new();
+            // Initialize a new set of locations and orientations.
+            let mut visited_locations_and_orientations: HashSet<(usize, usize, Orientation)> =
+                HashSet::new();
+            // Add the guard's starting position to the set.
             visited_locations_and_orientations.insert(starting_pos);
 
-            loop {
-                let mv = maze.move_guard(); 
-                match mv {
-                    GuardMove::TurnRight => {
-                        match maze.guard.orientation {
-                            Orientation::North => maze.guard.orientation = Orientation::East,
-                            Orientation::East => maze.guard.orientation = Orientation::South,
-                            Orientation::South => maze.guard.orientation = Orientation::West,
-                            Orientation::West => maze.guard.orientation = Orientation::North,
-                        }
-                        if break_condition(maze, &visited_locations_and_orientations) {
-                            positions_with_no_exit += 1;
-                            restore_maze(maze, starting_pos, (x, y));
-                            break;
-                        } 
-                        visited_locations_and_orientations.insert((maze.guard.x, maze.guard.y, maze.guard.orientation));
-                    }
-                    GuardMove::MoveForward(_, _) => {
-                        // println!("Guard moved to ({}, {})", x, y);
-                        if break_condition(maze, &visited_locations_and_orientations) {
-                            positions_with_no_exit += 1;
-                            restore_maze(maze, starting_pos, (x, y));
-                            break;
-                        } else {
-                            visited_locations_and_orientations.insert((x, y, maze.guard.orientation));
-                        }
-                    }
-                    GuardMove::ExitMaze => {
-                        // println!("Guard exited the maze.");
-                        restore_maze(maze, starting_pos, (x, y));
-                        break;
-                    }
+            // Try to exit the maze.
+            while !matches!(maze.move_guard(), GuardMove::ExitMaze) {
+                // If the guard is in a position and orientation that has already been visited, this a loop with no exit.
+                if break_condition(maze, &visited_locations_and_orientations) {
+                    positions_with_no_exit += 1;
+                    break;
                 }
+
+                // Otherwise, insert to the set and keep moving.
+                visited_locations_and_orientations.insert((
+                    maze.guard.x,
+                    maze.guard.y,
+                    maze.guard.orientation,
+                ));
             }
+            // Restore the maze to its original state by removing the obstacle and resetting the guard's position and orientation.
+            restore_maze(maze, starting_pos, (x, y));
         }
     }
 
