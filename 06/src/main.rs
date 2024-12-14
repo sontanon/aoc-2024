@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result, ensure};
-use std::{fmt::Display, fs, collections::HashSet};
+use std::{collections::HashSet, fmt::Display, fs};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Orientation {
     North,
     East,
@@ -28,7 +28,7 @@ impl Display for Guard {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 enum MazeCell {
     Obstacle,
     Empty,
@@ -197,11 +197,8 @@ impl Maze {
 }
 
 fn exercise_1(maze: &mut Maze) -> usize {
-    let mut move_history: Vec<GuardMove> = vec![];
-
     loop {
         let mv = maze.move_guard();
-        move_history.push(mv.clone());
         match mv {
             GuardMove::TurnRight => {
                 match maze.guard.orientation {
@@ -224,6 +221,78 @@ fn exercise_1(maze: &mut Maze) -> usize {
     maze.visited_locations.len()
 }
 
+fn restore_maze(maze: &mut Maze, starting_pos: (usize, usize, Orientation), old_obstacle: (usize, usize)) {
+    maze.guard.x = starting_pos.0;
+    maze.guard.y = starting_pos.1;
+    maze.guard.orientation = starting_pos.2;
+    maze.cells[old_obstacle.1][old_obstacle.0] = MazeCell::Empty;
+}
+
+fn break_condition(maze: &Maze, visited_locations_and_orientations: &HashSet<(usize, usize, Orientation)>) -> bool {
+    let (x, y, orientation) = (maze.guard.x, maze.guard.y, maze.guard.orientation);
+    visited_locations_and_orientations.contains(&(x, y, orientation))
+}
+
+fn exercise_2(maze: &mut Maze) -> usize {
+    let starting_pos = (maze.guard.x, maze.guard.y, maze.guard.orientation);
+    let mut positions_with_no_exit = 0;
+
+    // Place a new obstacle in each cell of the maze and try to exit the maze.
+    for x in 0..maze.n_cols {
+        for y in 0..maze.n_rows {
+            // Cannot place an obstacle in the guard starting location.
+            if (x, y) == (starting_pos.0, starting_pos.1) {
+                continue;
+            }
+            // Cannot place an obstacle if there is already an obstacle.
+            if maze.cells[y][x] == MazeCell::Obstacle {
+                continue;
+            }
+            maze.cells[y][x] = MazeCell::Obstacle;
+
+            let mut visited_locations_and_orientations: HashSet<(usize, usize, Orientation)> = HashSet::new();
+            visited_locations_and_orientations.insert(starting_pos);
+
+            loop {
+                let mv = maze.move_guard(); 
+                match mv {
+                    GuardMove::TurnRight => {
+                        match maze.guard.orientation {
+                            Orientation::North => maze.guard.orientation = Orientation::East,
+                            Orientation::East => maze.guard.orientation = Orientation::South,
+                            Orientation::South => maze.guard.orientation = Orientation::West,
+                            Orientation::West => maze.guard.orientation = Orientation::North,
+                        }
+                        if break_condition(maze, &visited_locations_and_orientations) {
+                            positions_with_no_exit += 1;
+                            restore_maze(maze, starting_pos, (x, y));
+                            break;
+                        } 
+                        visited_locations_and_orientations.insert((maze.guard.x, maze.guard.y, maze.guard.orientation));
+                    }
+                    GuardMove::MoveForward(_, _) => {
+                        // println!("Guard moved to ({}, {})", x, y);
+                        if break_condition(maze, &visited_locations_and_orientations) {
+                            positions_with_no_exit += 1;
+                            restore_maze(maze, starting_pos, (x, y));
+                            break;
+                        } else {
+                            visited_locations_and_orientations.insert((x, y, maze.guard.orientation));
+                        }
+                    }
+                    GuardMove::ExitMaze => {
+                        // println!("Guard exited the maze.");
+                        restore_maze(maze, starting_pos, (x, y));
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    positions_with_no_exit
+}
+
 fn main() -> Result<()> {
     let input_string = fs::read_to_string("input.txt")?;
     let maze = preprocessing(&input_string)?;
@@ -233,6 +302,9 @@ fn main() -> Result<()> {
 
     let result_1 = exercise_1(&mut maze.clone());
     println!("Result 1: {}", result_1);
+
+    let result_2 = exercise_2(&mut maze.clone());
+    println!("Result 2: {}", result_2);
 
     Ok(())
 }
