@@ -34,9 +34,7 @@ fn calculate_bounds(operands: &[usize]) -> (usize, usize) {
         }
     });
     let upper_bound = operands[1..].iter().fold(operands[0], |acc, &x| {
-        if acc == 1 {
-            acc + x
-        } else if x == 1 {
+        if acc == 1 || x == 1{
             acc + x
         } else {
             acc * x
@@ -118,7 +116,6 @@ fn exercise_1(input_str: &str) -> Result<usize> {
                 .ok_or_else(|| anyhow!("Invalid line"))?;
             let result = result.trim().parse::<usize>()?;
             let operands: Result<Vec<usize>> = operands
-                .trim()
                 .split_whitespace()
                 .map(|operand| -> Result<usize> {
                     operand
