@@ -56,16 +56,15 @@ impl AntennaGrid {
     }
 }
 
-fn main() -> Result<()> {
-    let input_str = fs::read_to_string("input.txt")?;
-    let antenna_grid = AntennaGrid::from_str(&input_str)?;
-
+fn exercise_1(antenna_grid: &AntennaGrid) -> Result<usize> {
     let unique_antennas: HashSet<char> = antenna_grid
         .cells
         .iter()
         .flat_map(|row| row.iter())
         .filter_map(|cell| cell.antenna)
         .collect();
+
+    ensure!(unique_antennas.len() > 1, "Not enough antennas");
 
     let antennas: HashMap<char, Vec<&AntennaCell>> = unique_antennas
         .iter()
@@ -94,6 +93,11 @@ fn main() -> Result<()> {
             Some((*antenna, cell_pairs))
         })
         .collect();
+
+    ensure!(
+        antenna_pairs.values().all(|pairs| !pairs.is_empty()),
+        "No antenna pairs"
+    );
 
     let antinodes: HashSet<(usize, usize)> = antenna_pairs
         .iter()
@@ -138,8 +142,15 @@ fn main() -> Result<()> {
         })
         .collect();
 
-    println!("{:?}", antinodes);
-    println!("Number of antinodes: {}", antinodes.len());
+    Ok(antinodes.len())
+}
+
+fn main() -> Result<()> {
+    let input_str = fs::read_to_string("input.txt")?;
+    let antenna_grid = AntennaGrid::from_str(&input_str)?;
+
+    let result_1 = exercise_1(&antenna_grid)?;
+    println!("Result: {}", result_1);
 
     Ok(())
 }
