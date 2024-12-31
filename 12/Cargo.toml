@@ -1,0 +1,9 @@
+[package]
+name = "hoof_it"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.94"
+rstest = "0.23.0"
+
