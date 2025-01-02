@@ -1,5 +1,5 @@
 use anyhow::{anyhow, ensure, Result};
-use std::{fs, mem::swap};
+use std::fs;
 
 #[derive(Debug, PartialEq, Clone)]
 enum Move {
@@ -135,112 +135,93 @@ impl Warehouse {
             // This cannot be possible since there is only one robot.
             WarehouseCell::Robot => Err(anyhow!("Robot cannot move into another robot")),
             // Real problem: move into a box an try to push it...
-            WarehouseCell::Box => match mv {
-                Move::Up => {
-                    // Find an empty cell or a wall above: cells[0..y_r][x_r]
-                    // Notice that we are searching from the right.
-                    // In other words, our search is y_r-1, y_r-2, ..., 0.
-                    if let Some(y_c) = (0..y_r)
-                        .map(|j| &self.cells[j][x_r])
-                        .rposition(|c| *c != WarehouseCell::Box)
-                    {
-                        // If we found a wall first, then there is no move.
-                        if self.cells[y_c][x_r] == WarehouseCell::Wall {
+            WarehouseCell::Box => {
+                // Get the candidate of where the box(es) may be moved to.
+                let (x_c, y_c) = match mv {
+                    Move::Up => (
+                        Some(x_r),
+                        (0..y_p)
+                            .map(|j| &self.cells[j][x_r])
+                            .rposition(|c| *c != WarehouseCell::Box),
+                    ),
+                    Move::Down => (
+                        Some(x_r),
+                        (y_p + 1..self.height)
+                            .map(|j| &self.cells[j][x_r])
+                            .position(|c| *c != WarehouseCell::Box)
+                            .map(|y| y_p + 1 + y),
+                    ),
+                    Move::Right => (
+                        (x_p + 1..self.width)
+                            .map(|i| &self.cells[y_r][i])
+                            .position(|c| *c != WarehouseCell::Box)
+                            .map(|x| x + x_p + 1),
+                        Some(y_r),
+                    ),
+                    Move::Left => (
+                        (0..x_p)
+                            .map(|i| &self.cells[y_r][i])
+                            .rposition(|c| *c != WarehouseCell::Box),
+                        Some(y_r),
+                    ),
+                };
+                match (x_c, y_c) {
+                    (None, _) => Ok(false),
+                    (_, None) => Ok(false),
+                    (Some(x_c), Some(y_c)) => {
+                        // Candidate cell was a wall, cannot move.
+                        if self.cells[y_c][x_c] == WarehouseCell::Wall {
                             return Ok(false);
                         }
-                        // Otherwise, we found an empty cell and can move all cells (including the robot) one cell above.
-                        // We know the cell at (y_c, x_r) is empty and all cells with y_c < y <= y_r are non-empty.
-                        // Here we are essentially swapping from the left cells[j][x_r] <-> cells[j+1][x_r].
-                        // Given Rust's borrowing rules, we have to do some juggling, though...
-                        // Alternatively, we could recurse here?
-                        for j in y_c..y_r {
-                            let (up, down) = self.cells.split_at_mut(j + 1);
-                            swap(&mut up[j][x_r], &mut down[0][x_r]);
-                        }
-                        return Ok(true);
+                        // Otherwise, make the move.
+                        self.cells[y_c][x_c] = WarehouseCell::Box;
+                        self.cells[y_p][x_p] = WarehouseCell::Robot;
+                        self.cells[y_r][x_r] = WarehouseCell::Empty;
+                        self.robot_location = (x_p, y_p);
+                        Ok(true)
                     }
-                    Ok(false)
                 }
-                Move::Down => {
-                    // Find an empty cell or a wall below: cells[y_r+1..self.height][x_r]
-                    // Notice that we are searching from the left.
-                    // In other words, our search is y_r+1, y_r+2, ..., self.height - 1.
-                    if let Some(y_c) = (y_r + 1..self.height)
-                        .map(|j| &self.cells[j][x_r])
-                        .position(|c| *c != WarehouseCell::Box)
-                    {
-                        // If we found a wall first, then there is no move.
-                        if self.cells[y_c][x_r] == WarehouseCell::Wall {
-                            return Ok(false);
-                        }
-                        // Otherwise, we found an empty cell and can move all cells (including the robot) once cell below.
-                        // We know the cell at (y_c, x_r) is empty and all cells with y_r <= y < y_c are non-empty.
-                        // Here we are essentially swapping from the right cells[j][x_r] <-> cells[j-1][x_r].
-                        // Careful with the range since it is reversed and must not touch y_r.
-                        for j in ((y_r + 1)..=y_c).rev() {
-                            let (up, down) = self.cells.split_at_mut(j);
-                            swap(&mut up[j - 1][x_r], &mut down[0][x_r]);
-                        }
-                        return Ok(true);
-                    }
-                    Ok(false)
-                }
-                Move::Left => {
-                    // Find an empty cell or a wall to the left: cells[y_r][0..x_r]
-                    // Notice that we are searching from the right.
-                    // In other words, our search is x_r-1, x_r-2, ..., 0.
-                    if let Some(x_c) = (0..x_r)
-                        .map(|i| &self.cells[y_r][i])
-                        .rposition(|c| *c != WarehouseCell::Box)
-                    {
-                        // If we found a wall first, then there is no move.
-                        if self.cells[y_r][x_c] == WarehouseCell::Wall {
-                            return Ok(false);
-                        }
-                        // Otherwise, we found an empty cell and can move all cells (including the robot) one cell to the left.
-                        // We know the cell at (y_r, x_c) is empty and all cells with x_c < x <= x_r are non-empty.
-                        // Here we are essentially swapping from the left cells[y_r][i] <-> cells[y_r][i+1].
-                        // Given Rust's borrowing rules, we have to do some juggling, though...
-                        // Alternatively, we could recurse here?
-                        for i in x_c..x_r {
-                            let (left, right) = self.cells[y_r].split_at_mut(i + 1);
-                            swap(&mut left[i], &mut right[0]);
-                        }
-                        return Ok(true);
-                    }
-                    Ok(false)
-                }
-                Move::Right => {
-                    // Find an empty cell or a wall to the right: cells[y_r][x_r+1..self.width]
-                    // Notice that we are searching from the left.
-                    // In other words, our search is x_r+1, x_r+2, ..., self.width - 1.
-                    if let Some(x_c) = (x_r + 1..self.width)
-                        .map(|i| &self.cells[y_r][i])
-                        .position(|c| *c != WarehouseCell::Box)
-                    {
-                        // If we found a wall first, then there is no move.
-                        if self.cells[y_r][x_c] == WarehouseCell::Wall {
-                            return Ok(false);
-                        }
-                        // Otherwise, we found an empty cell and can move all cells (including the robot) one cell to the right.
-                        // We know the cell at (y_r, x_c) is empty and all cells with x_r <= x < x_c are non-empty.
-                        // Here we are essentially swapping from the right cells[y_r][i] <-> cells[y_r][i-1].
-                        // Careful with the range since it is reversed and must not touch x_r.
-                        for i in ((x_r + 1)..=x_c).rev() {
-                            let (left, right) = self.cells[y_r].split_at_mut(i);
-                            swap(&mut left[i - 1], &mut right[0]);
-                        }
-                        return Ok(true);
-                    }
-                    Ok(false)
-                }
-            },
+            }
         }
+    }
+
+    fn calculate_score(&self) -> usize {
+        (0..self.height).flat_map(
+            |j| (0..self.width)
+                .filter_map(
+                    move |i| {
+                        if self.cells[j][i] == WarehouseCell::Box {
+                            return Some((i, j))
+                        }
+                        None
+                    }
+                )
+        )
+        .map(
+            |(i, j)| 100 * j + i
+        )
+        .sum()
     }
 }
 
-fn main() {
-    println!("Hello, world!");
+fn exercise_1(input_str: &str) -> Result<usize> {
+    let (mut warehouse, moves) = preprocessing(input_str)?;
+    for mv in &moves {
+        warehouse.move_robot(mv)?;
+    }
+    Ok(warehouse.calculate_score())
+}
+
+fn main() -> Result<()> {
+
+    let input_str = fs::read_to_string("input.txt")?;
+
+    println!(
+        "Exercise 1: {}",
+        exercise_1(&input_str)?
+    );
+
+    Ok(())
 }
 
 fn preprocessing(input_str: &str) -> Result<(Warehouse, Vec<Move>)> {
@@ -255,6 +236,41 @@ fn preprocessing(input_str: &str) -> Result<(Warehouse, Vec<Move>)> {
         .collect();
     let moves = moves?;
     Ok((warehouse, moves))
+}
+
+use std::fmt::{self, Display, Formatter};
+impl Display for Warehouse {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        for row in &self.cells {
+            for cell in row {
+                write!(
+                    f,
+                    "{}",
+                    match cell {
+                        WarehouseCell::Empty => '.',
+                        WarehouseCell::Wall => '#',
+                        WarehouseCell::Box => 'O',
+                        WarehouseCell::Robot => '@',
+                    }
+                )?;
+            }
+            writeln!(f)?;
+        }
+        Ok(())
+    }
+}
+
+impl Display for Move {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let c = match self {
+            Move::Down => 'v',
+            Move::Up => '^',
+            Move::Left => '<',
+            Move::Right => '>',
+        };
+        write!(f, "{}", c)?;
+        Ok(())
+    }
 }
 
 // fn exercise_1(input_str: &str) -> Result<usize> {}
@@ -277,28 +293,6 @@ mod tests {
 
 <^^>>>vv
 <v>>v<<"
-    }
-
-    fn sample_states() -> Vec<Warehouse> {
-        vec![
-            "########
-#..O.O.#
-##@.O..#
-#...O..#
-#.#.O..#
-#...O..#
-#......#
-########",
-            "########
-#.@O.O.#
-##..O..#
-#...O..#
-#.#.O..#
-#...O..#
-#......#
-########",
-            
-        ]
     }
 
     #[fixture]
@@ -437,44 +431,33 @@ v^^>>><<^^<>>^v^<v^vv<>v^<<>^<^v^v><^<<<><<^<v><v<>vv>>v><v^<vv<>v^<<^"
     }
 
     #[rstest]
-    fn test_move_left(expected_warehouse: Warehouse) {
-        let mut warehouse = expected_warehouse.clone();
-        assert_eq!(warehouse.move_robot(&Move::Left).unwrap(), false);
-    }
-
-    #[rstest]
-    fn test_move_right(expected_warehouse: Warehouse) {
-        let mut warehouse = expected_warehouse.clone();
-        assert_eq!(warehouse.move_robot(&Move::Right).unwrap(), true);
-    }
-
-    #[rstest]
-    fn test_move_up(expected_warehouse: Warehouse) {
-        let mut warehouse = expected_warehouse.clone();
-        assert_eq!(warehouse.move_robot(&Move::Up).unwrap(), true);
-    }
-    #[rstest]
-    fn test_move_down(expected_warehouse: Warehouse) {
-        let mut warehouse = expected_warehouse.clone();
-        assert_eq!(warehouse.move_robot(&Move::Down).unwrap(), true);
-    }
-    #[rstest]
-    fn test_simple_push(expected_warehouse: Warehouse) {
-        let mut warehouse = expected_warehouse.clone();
-        assert_eq!(warehouse.move_robot(&Move::Up).unwrap(), true);
-        assert_eq!(warehouse.move_robot(&Move::Right).unwrap(), true);
-    }
-
-    #[rstest]
     fn test_simple_moves(
         expected_warehouse: Warehouse,
         expected_moves_simple: Vec<Move>,
         expected_position_simple: (usize, usize),
     ) {
         let mut warehouse = expected_warehouse.clone();
-        for mv in expected_moves_simple.iter() {
+        println!("Initial configuration:\n{}", warehouse);
+        for (k, mv) in expected_moves_simple.iter().enumerate() {
             warehouse.move_robot(mv).unwrap();
+            println!("Configuration after move {} {}:\n{}", k + 1, mv, warehouse);
         }
         assert_eq!(warehouse.robot_location, expected_position_simple);
+    }
+
+    #[rstest]
+    fn test_exercise_1(
+        sample_input_str_simple: &str,
+        sample_input_str: &str,
+    ) {
+        assert_eq!(
+            exercise_1(sample_input_str_simple).unwrap(),
+            2028,
+        );
+
+        assert_eq!(
+            exercise_1(sample_input_str).unwrap(),
+            10092,
+        );
     }
 }
