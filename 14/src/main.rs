@@ -1,4 +1,4 @@
-use anyhow::{ensure, Result};
+use anyhow::{anyhow, ensure, Result};
 use regex::Regex;
 use std::fs;
 
@@ -12,15 +12,13 @@ fn main() -> Result<()> {
 fn exercise_1(input_str: &str, width: usize, height: usize, timesteps: usize) -> Result<usize> {
     let guards: Result<Vec<Guard>> = input_str
         .lines()
-        .map(|line| Guard::from_str(line))
+        .map(Guard::from_str)
         .collect();
     let guards = guards?;
     let mut map = Map::new(width, height, guards);
 
     map.advance_timesteps(timesteps);
-    let safety_score = map.calculate_guards_per_quadrant()
-        .iter()
-        .product();
+    let safety_score = map.calculate_guards_per_quadrant().iter().product();
 
     Ok(safety_score)
 }
@@ -33,15 +31,10 @@ struct Map {
 }
 
 fn move_cyclically(position: usize, velocity: isize, max: usize) -> usize {
-    let mut w_position = position;
-    if velocity < 0 {
-        while (w_position as isize) < -velocity {
-            w_position += max;
-        }
-        w_position + velocity as usize
-    } else {
-        (w_position + velocity as usize) % max
-    }
+    let position = position as isize;
+    let max = max as isize;
+    let new_position = ((position + velocity) % max + max) % max;
+    new_position as usize
 }
 
 impl Map {
@@ -71,19 +64,27 @@ impl Map {
     }
 
     fn calculate_guards_per_quadrant(&self) -> [usize; 4] {
-        let nw_guards = self.guards.iter()
+        let nw_guards = self
+            .guards
+            .iter()
             .flat_map(|g| g.assign_quadrant(self.width, self.height))
             .filter(|q| *q == Quadrant::NorthWest)
             .count();
-        let ne_guards = self.guards.iter()
+        let ne_guards = self
+            .guards
+            .iter()
             .flat_map(|g| g.assign_quadrant(self.width, self.height))
             .filter(|q| *q == Quadrant::NorthEast)
             .count();
-        let se_guards = self.guards.iter()
+        let se_guards = self
+            .guards
+            .iter()
             .flat_map(|g| g.assign_quadrant(self.width, self.height))
             .filter(|q| *q == Quadrant::SouthEast)
             .count();
-        let sw_guards = self.guards.iter()
+        let sw_guards = self
+            .guards
+            .iter()
             .flat_map(|g| g.assign_quadrant(self.width, self.height))
             .filter(|q| *q == Quadrant::SouthWest)
             .count();
@@ -108,18 +109,31 @@ struct Guard {
 
 impl Guard {
     fn new(position: [usize; 2], velocity: [isize; 2]) -> Self {
-        Self {position, velocity}
+        Self { position, velocity }
     }
 
     fn from_str(input_str: &str) -> Result<Self> {
         let number_pattern = Regex::new(r"p=(\d+),(\d+) v=(-?\d+),(-?\d+)")?;
 
-        let numbers: Vec<isize> = number_pattern
+        let numbers: Result<Vec<isize>> = number_pattern
             .captures_iter(input_str)
-            .map(|c| isizc.extract())
+            .flat_map(|c| {
+                vec![
+                    c[1].parse().map_err(|_| anyhow!("Integer parse error")),
+                    c[2].parse().map_err(|_| anyhow!("Integer parse error")),
+                    c[3].parse().map_err(|_| anyhow!("Integer parse error")),
+                    c[4].parse().map_err(|_| anyhow!("Integer parse error")),
+                ]
+            })
             .collect();
 
-        ensure!(numbers.len() == 4, "Invalid input string");
+        let numbers = numbers?;
+
+        ensure!(numbers.len() == 4, "Expected 4 numbers in the input string");
+        ensure!(
+            numbers[0] >= 0 && numbers[1] >= 0,
+            "Position values must be non-negative"
+        );
 
         Ok(Self {
             position: [numbers[0] as usize, numbers[1] as usize],
@@ -153,7 +167,7 @@ mod tests {
 
     #[fixture]
     fn sample_line() -> &'static str {
-        "p=0,4, v=3,-3"
+        "p=0,4 v=3,-3"
     }
 
     #[fixture]
@@ -162,17 +176,11 @@ mod tests {
     }
 
     #[rstest]
-    fn test_from_str(
-        sample_line: &str, 
-        expected_guard: Guard,
-    ) {
-        assert_eq!(
-            Guard::from_str(sample_line).unwrap(),
-            expected_guard
-        )
+    fn test_from_str(sample_line: &str, expected_guard: Guard) {
+        assert_eq!(Guard::from_str(sample_line).unwrap(), expected_guard)
     }
 
-    #[fixture] 
+    #[fixture]
     fn sample_input() -> &'static str {
         "p=0,4 v=3,-3
 p=6,3 v=-1,-3
@@ -188,7 +196,7 @@ p=2,4 v=2,-3
 p=9,5 v=-3,-3"
     }
 
-    #[fixture] 
+    #[fixture]
     fn expected_guards() -> Vec<Guard> {
         vec![
             Guard::new([0, 4], [3, -3]),
@@ -207,14 +215,16 @@ p=9,5 v=-3,-3"
     }
 
     #[rstest]
-    fn test_preprocessing(
-        sample_input: &str,
-        expected_guards: Vec<Guard>, 
-    ) {
-        let guards: Result<Vec<Guard>> = sample_input.lines()
+    fn test_preprocessing(sample_input: &str, expected_guards: Vec<Guard>) {
+        let guards: Result<Vec<Guard>> = sample_input
+            .lines()
             .map(|line| Guard::from_str(line))
             .collect();
         assert_eq!(guards.unwrap(), expected_guards);
     }
 
+    #[rstest]
+    fn test_exercise_1(sample_input: &str) {
+        assert_eq!(exercise_1(sample_input, 11, 7, 100).unwrap(), 12);
+    }
 }
