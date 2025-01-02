@@ -181,6 +181,6 @@ Prize: X=8400, Y=5400"
     fn test_cost_calculation(expected_input: System, expected_output: usize) {
         let mut system = expected_input;
         system.solve();
-        assert_eq!(system.calculate_cost(), Some(expected_output));
+        assert_eq!(system.calculate_cost(Some(100)), Some(expected_output));
     }
 }
