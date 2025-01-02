@@ -1,26 +1,49 @@
 use anyhow::{anyhow, ensure, Result};
 use regex::Regex;
-use std::fs;
+use std::{collections::HashSet, fs};
 
 fn main() -> Result<()> {
     let input_str = fs::read_to_string("input.txt")?;
-    println!("Exercise 1: {}", exercise_1(&input_str, 101, 103, 100)?);
+    println!(
+        "Exercise 1: {}",
+        exercise_1(&input_str, 101, 103, 100, false)?
+    );
+
+    println!(
+        "Exercise 2: {}",
+        exercise_2(&input_str, 101, 103, 1_000_000)?
+    );
 
     Ok(())
 }
 
-fn exercise_1(input_str: &str, width: usize, height: usize, timesteps: usize) -> Result<usize> {
-    let guards: Result<Vec<Guard>> = input_str
-        .lines()
-        .map(Guard::from_str)
-        .collect();
-    let guards = guards?;
-    let mut map = Map::new(width, height, guards);
+fn exercise_1(
+    input_str: &str,
+    width: usize,
+    height: usize,
+    timesteps: usize,
+    print: bool,
+) -> Result<usize> {
+    let mut map = Map::from_str(input_str, width, height)?;
 
-    map.advance_timesteps(timesteps);
+    map.advance_timesteps(timesteps, print);
     let safety_score = map.calculate_guards_per_quadrant().iter().product();
 
     Ok(safety_score)
+}
+
+
+fn exercise_2(input_str: &str, width: usize, height: usize, max_iterations: usize) -> Result<usize> {
+    let mut map = Map::from_str(input_str, width, height)?;
+
+    for k in 0..max_iterations {
+        if map.dense_frame() {
+            println!("{}", map);
+            return Ok(k);
+        }
+        map.advance_timesteps(1, false);
+    }
+    Err(anyhow!("No dense frame found after {} iterations", max_iterations))
 }
 
 #[derive(Debug, PartialEq)]
@@ -46,6 +69,12 @@ impl Map {
         }
     }
 
+    fn from_str(input_str: &str, width: usize, height: usize) -> Result<Self> {
+        let guards: Result<Vec<Guard>> = input_str.lines().map(Guard::from_str).collect();
+        let guards = guards?;
+        Ok(Map::new(width, height, guards))
+    }
+
     fn move_guards(&mut self) {
         for guard in &mut self.guards {
             let [p_x, p_y] = guard.position;
@@ -57,9 +86,15 @@ impl Map {
         }
     }
 
-    fn advance_timesteps(&mut self, n: usize) {
+    fn advance_timesteps(&mut self, n: usize, print: bool) {
+        if print {
+            println!("{}", self);
+        }
         for _ in 0..n {
             self.move_guards();
+            if print {
+                println!("{}", self);
+            }
         }
     }
 
@@ -90,6 +125,67 @@ impl Map {
             .count();
 
         [nw_guards, ne_guards, se_guards, sw_guards]
+    }
+
+    fn dense_row(&self, j: usize) -> bool {
+        let columns: HashSet<usize> = HashSet::from_iter(self.guards.iter().filter_map(|g| {
+            if g.position[1] == j {
+                Some(g.position[0])
+            } else {
+                None
+            }
+        }));
+        columns.len() >= 30
+    }
+
+    fn dense_column(&self, i: usize) -> bool {
+        let rows: HashSet<usize> = HashSet::from_iter(self.guards.iter().filter_map(|g| {
+            if g.position[0] == i {
+                Some(g.position[1])
+            } else {
+                None
+            }
+        }));
+        rows.len() >= 30
+    }
+
+    fn dense_frame(&self) -> bool {
+        (0..self.width).any(|i| self.dense_column(i)) && (0..self.height).any(|j| self.dense_row(j))
+    }
+}
+
+use std::fmt::{self, Display, Formatter};
+impl Display for Map {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        let mut map = vec![vec!['.'; self.width + 2]; self.height + 2];
+        map[0] = vec!['-'; self.width + 2];
+        map[self.height + 1] = vec!['-'; self.width + 2];
+        for row in map.iter_mut().skip(1).take(self.height) {
+            row[0] = '|';
+            row[self.width + 1] = '|';
+        }
+
+        for guard in &self.guards {
+            let [x, y] = guard.position;
+            match map[y + 1][x + 1] {
+                '.' => map[y + 1][x + 1] = '1',
+                '*' => map[y + 1][x + 1] = '*',
+                c => {
+                    let n = c.to_digit(10).unwrap();
+                    if n == 9 {
+                        map[y + 1][x + 1] = '*';
+                    } else {
+                        map[y + 1][x + 1] = char::from_digit(n + 1, 10).unwrap();
+                    }
+                }
+            }
+        }
+
+        for row in map {
+            writeln!(f, "{}", row.iter().collect::<String>())?;
+        }
+
+        Ok(())
     }
 }
 
@@ -225,6 +321,6 @@ p=9,5 v=-3,-3"
 
     #[rstest]
     fn test_exercise_1(sample_input: &str) {
-        assert_eq!(exercise_1(sample_input, 11, 7, 100).unwrap(), 12);
+        assert_eq!(exercise_1(sample_input, 11, 7, 100, true).unwrap(), 12);
     }
 }
