@@ -7,6 +7,7 @@ fn main() -> Result<()> {
     let input_str = fs::read_to_string("input.txt")?;
 
     println!("Exercise 1: {}", exercise_1(&input_str)?);
+    println!("Exercise 2: {}", exercise_2(&input_str)?);
 
     Ok(())
 }
@@ -14,7 +15,9 @@ fn main() -> Result<()> {
 fn exercise_1(input_str: &str) -> Result<usize> {
     let (mut warehouse, moves) = preprocessing(input_str)?;
     for mv in &moves {
-        warehouse.move_robot(mv)?;
+        if let Some((x, y)) = warehouse.move_cell(mv, warehouse.robot_location)? {
+            warehouse.robot_location = (x, y);
+        }
     }
     Ok(warehouse.calculate_score())
 }
@@ -22,7 +25,9 @@ fn exercise_1(input_str: &str) -> Result<usize> {
 fn exercise_2(input_str: &str) -> Result<usize> {
     let (mut warehouse, moves) = preprocessing_big(input_str)?;
     for mv in &moves {
-        warehouse.move_robot(mv)?;
+        if let Some((x, y)) = warehouse.move_cell(mv, warehouse.robot_location)? {
+            warehouse.robot_location = (x, y);
+        }
     }
     Ok(warehouse.calculate_score())
 }
@@ -62,6 +67,10 @@ impl WarehouseCell {
             _ => Err(anyhow!("Invalid character: {}", c)),
         }
     }
+
+    fn movable(&self) -> bool {
+        matches!(self, Self::Box | Self::Robot)
+    }
 }
 
 impl From<WarehouseCell> for char {
@@ -85,6 +94,10 @@ impl BigWarehouseCell {
             '@' => Ok(Self::Robot),
             _ => Err(anyhow!("Invalid character: {}", c)),
         }
+    }
+
+    fn movable(&self) -> bool {
+        matches!(self, Self::LeftBox | Self::RightBox | Self::Robot)
     }
 }
 
@@ -171,77 +184,75 @@ impl FromStr for Warehouse {
 }
 
 impl Warehouse {
-    fn move_robot(&mut self, mv: &Move) -> Result<bool> {
-        let (x_r, y_r) = self.robot_location;
+    fn move_cell(&mut self, mv: &Move, (x, y): (usize, usize)) -> Result<Option<(usize, usize)>> {
+        ensure!(self.cells[y][x].movable(), "Cannot move a non-movable cell");
+
         ensure!(
-            x_r > 0 && x_r < self.width - 1 && y_r > 0 && y_r < self.height - 1,
-            "Cannot move robot on the edge"
+            x > 0 && x < self.width - 1 && y > 0 && y < self.height - 1,
+            "Cannot move on the edge"
         );
 
-        let (x_p, y_p) = match mv {
-            Move::Up => (x_r, y_r - 1),
-            Move::Down => (x_r, y_r + 1),
-            Move::Left => (x_r - 1, y_r),
-            Move::Right => (x_r + 1, y_r),
+        let (x_n, y_n) = match mv {
+            Move::Up => (x, y - 1),
+            Move::Down => (x, y + 1),
+            Move::Left => (x - 1, y),
+            Move::Right => (x + 1, y),
         };
 
-        match &self.cells[y_p][x_p] {
+        match &self.cells[y_n][x_n] {
             // Simplest case, the cell where we are moving to is empty.
             WarehouseCell::Empty => {
-                self.cells[y_r][x_r] = WarehouseCell::Empty;
-                self.cells[y_p][x_p] = WarehouseCell::Robot;
-                self.robot_location = (x_p, y_p);
-                Ok(true)
+                self.cells[y_n][x_n] = self.cells[y][x].clone();
+                self.cells[y][x] = WarehouseCell::Empty;
+                Ok(Some((x_n, y_n)))
             }
             // Also simple, bump directly into a wall: no move but Ok.
-            WarehouseCell::Wall => Ok(false),
+            WarehouseCell::Wall => Ok(None),
             // This cannot be possible since there is only one robot.
-            WarehouseCell::Robot => Err(anyhow!("Robot cannot move into another robot")),
+            WarehouseCell::Robot => Err(anyhow!("Cannot move into robot")),
             // Real problem: move into a box an try to push it...
             WarehouseCell::Box => {
                 // Get the candidate of where the box(es) may be moved to.
                 let (x_c, y_c) = match mv {
                     Move::Up => (
-                        Some(x_r),
-                        (0..y_p)
-                            .map(|j| &self.cells[j][x_r])
-                            .rposition(|c| *c != WarehouseCell::Box),
+                        Some(x),
+                        (0..y_n)
+                            .map(|j| &self.cells[j][x])
+                            .rposition(|c| !c.movable()),
                     ),
                     Move::Down => (
-                        Some(x_r),
-                        (y_p + 1..self.height)
-                            .map(|j| &self.cells[j][x_r])
-                            .position(|c| *c != WarehouseCell::Box)
-                            .map(|y| y_p + 1 + y),
+                        Some(x),
+                        (y_n + 1..self.height)
+                            .map(|j| &self.cells[j][x])
+                            .position(|c| !c.movable())
+                            .map(|y| y_n + 1 + y),
                     ),
                     Move::Right => (
-                        (x_p + 1..self.width)
-                            .map(|i| &self.cells[y_r][i])
-                            .position(|c| *c != WarehouseCell::Box)
-                            .map(|x| x + x_p + 1),
-                        Some(y_r),
+                        (x_n + 1..self.width)
+                            .map(|i| &self.cells[y][i])
+                            .position(|c| !c.movable())
+                            .map(|x| x + x_n + 1),
+                        Some(y),
                     ),
                     Move::Left => (
-                        (0..x_p)
-                            .map(|i| &self.cells[y_r][i])
-                            .rposition(|c| *c != WarehouseCell::Box),
-                        Some(y_r),
+                        (0..x_n)
+                            .map(|i| &self.cells[y][i])
+                            .rposition(|c| !c.movable()),
+                        Some(y),
                     ),
                 };
                 match (x_c, y_c) {
-                    (None, _) => Ok(false),
-                    (_, None) => Ok(false),
+                    (None, _) | (_, None) => Ok(None),
                     (Some(x_c), Some(y_c)) => {
                         // Candidate cell was a wall, cannot move.
                         if self.cells[y_c][x_c] == WarehouseCell::Wall {
-                            return Ok(false);
+                            return Ok(None);
                         }
                         // Otherwise, make the move.
                         self.cells[y_c][x_c] = WarehouseCell::Box;
-                        self.cells[y_p][x_p] = WarehouseCell::Robot;
-                        self.cells[y_r][x_r] = WarehouseCell::Empty;
-                        self.robot_location = (x_p, y_p);
-                        Ok(true)
+                        self.cells[y_n][x_n] = self.cells[y][x].clone();
+                        self.cells[y][x] = WarehouseCell::Empty;
+                        Ok(Some((x_n, y_n)))
                     }
                 }
             }
@@ -379,93 +390,106 @@ impl BigWarehouse {
         })
     }
 
-    fn move_robot(&mut self, mv: &Move) -> Result<bool> {
-        let (x_r, y_r) = self.robot_location;
+    fn get(&self, x: usize, y: usize) -> &BigWarehouseCell {
+        &self.cells[y][x]
+    }
+
+    fn can_move_cell(&self, mv: &Move, (x, y): (usize, usize)) -> Result<bool> {
+        ensure!(self.get(x, y).movable(), "Cannot move a non-movable cell");
+
         ensure!(
-            x_r > 1 && x_r < self.width - 2 && y_r > 0 && y_r < self.height - 1,
-            "Cannot move robot on the edge"
+            x > 1 && x < self.width - 2 && y > 0 && y < self.height - 1,
+            "Cannot move on the edge"
         );
 
-        let (x_p, y_p) = match mv {
-            Move::Up => (x_r, y_r - 1),
-            Move::Down => (x_r, y_r + 1),
-            Move::Left => (x_r - 1, y_r),
-            Move::Right => (x_r + 1, y_r),
+        let (x_n, y_n) = match mv {
+            Move::Up => (x, y - 1),
+            Move::Down => (x, y + 1),
+            Move::Left => (x - 1, y),
+            Move::Right => (x + 1, y),
         };
 
-        match &self.cells[y_p][x_p] {
-            // First cases are the same as the normal warehouse.
-            BigWarehouseCell::Empty => {
-                self.cells[y_r][x_r] = BigWarehouseCell::Empty;
-                self.cells[y_p][x_p] = BigWarehouseCell::Robot;
-                self.robot_location = (x_p, y_p);
-                Ok(true)
-            }
+        match self.get(x_n, y_n) {
+            BigWarehouseCell::Empty => Ok(true),
             BigWarehouseCell::Wall => Ok(false),
-            BigWarehouseCell::Robot => Err(anyhow!("Robot cannot move into another robot")),
-            // For this case, we may cascade multiple movements due to overlap.
-            // A recursive approach is probably best.
-            _ => {
-                // The horizontal movements are simpler.
-                if mv == &Move::Left || mv == &Move::Right {
-                    let (x_c, y_c) = (
-                        match mv {
-                            Move::Right => (x_p + 1..self.width)
-                                .map(|i| &self.cells[y_r][i])
-                                .position(|c| {
-                                    *c != BigWarehouseCell::LeftBox
-                                        || *c != BigWarehouseCell::RightBox
-                                })
-                                .map(|x| x + x_p + 1),
-                            Move::Left => (0..x_p).map(|i| &self.cells[y_r][i]).rposition(|c| {
-                                *c != BigWarehouseCell::RightBox || *c != BigWarehouseCell::LeftBox
-                            }),
-                            _ => unreachable!(),
-                        },
-                        y_r,
+            BigWarehouseCell::Robot => Err(anyhow!("Cannot move into robot")),
+            BigWarehouseCell::LeftBox => match mv {
+                Move::Right | Move::Left => self.can_move_cell(mv, (x_n, y_n)),
+                Move::Up | Move::Down => {
+                    ensure!(
+                        *self.get(x_n + 1, y_n) == BigWarehouseCell::RightBox,
+                        "Missing paired right box"
                     );
-                    if let Some(x_c) = x_c {
-                        if self.cells[y_c][x_c] == BigWarehouseCell::Wall {
-                            return Ok(false);
-                        }
-                        // Move is not a simple assignment, rather we need to overwrite the slice using a rotation.
-                        if mv == &Move::Right {
-                            self.cells[y_r][x_r..=x_c].rotate_right(1);
-                        } else {
-                            self.cells[y_r][x_c..=x_r].rotate_left(1);
-                        }
-                        self.robot_location = (x_p, y_p);
-                        return Ok(true)
-                    }
-                    Ok(false)
+                    let can_move_left = self.can_move_cell(mv, (x_n, y_n))?;
+                    let can_move_right = self.can_move_cell(mv, (x_n + 1, y_n))?;
+                    Ok(can_move_left & can_move_right)
                 }
-                // Vertical movements are more complex.
-                match &self.cells[y_p][x_p] {
-                    BigWarehouseCell::LeftBox => {
-                        // Recursive call.
-                        // First assume the movement will be possible by setting the robot location to the candidate.
-                        self.cells[y_p][x_p] = BigWarehouseCell::Robot;
-                        self.cells[y_r][x_r] = BigWarehouseCell::Empty;
-                        self.robot_location = (x_p, y_p);
-                        // Attempt to move the left box.
-                        let push_left_box = self.move_robot(mv)?;
-                        // If the left box was not moved, reset to previous state and return early.
-                        if !push_left_box {
-                            self.cells[y_p][x_p] = BigWarehouseCell::LeftBox;
-                            self.cells[y_r][x_r] = BigWarehouseCell::Robot;
-                            self.robot_location = (x_r, y_r);
-                            return Ok(false);
-                        }
-                        // Otherwise, attempt to move the right box now by imagining a robot at the right box.
-                        self.cells[y_p][x_p]
-                        self.cells[y_p][x_p + 1] = BigWarehouseCell::Robot;
-                        todo!()
+            },
+            BigWarehouseCell::RightBox => match mv {
+                Move::Right | Move::Left => self.can_move_cell(mv, (x_n, y_n)),
+                Move::Up | Move::Down => {
+                    ensure!(
+                        *self.get(x_n - 1, y_n) == BigWarehouseCell::LeftBox,
+                        "Missing paired left box"
+                    );
+                    let can_move_right = self.can_move_cell(mv, (x_n, y_n))?;
+                    let can_move_left = self.can_move_cell(mv, (x_n - 1, y_n))?;
+                    Ok(can_move_left & can_move_right)
+                }
+            },
+        }
+    }
+
+    fn move_cell(&mut self, mv: &Move, (x, y): (usize, usize)) -> Result<Option<(usize, usize)>> {
+        if !self.can_move_cell(mv, (x, y))? {
+            return Ok(None);
+        }
+
+        let (x_n, y_n) = match mv {
+            Move::Up => (x, y - 1),
+            Move::Down => (x, y + 1),
+            Move::Left => (x - 1, y),
+            Move::Right => (x + 1, y),
+        };
+
+        // We know that we can move into the new cell.
+        // However, we may need to cascade other movements if the
+        // neighboring cells is a box.
+        match self.get(x_n, y_n) {
+            BigWarehouseCell::Wall => unreachable!(),
+            BigWarehouseCell::Robot => unreachable!(),
+            BigWarehouseCell::Empty => {
+                // No need to recurse, just a simple swap moving into an empty cell.
+            }
+            BigWarehouseCell::LeftBox => {
+                match mv {
+                    Move::Right | Move::Left => {
+                        // We know these boxes can be moved, so they must be moved before the current cell.
+                        self.move_cell(mv, (x_n, y_n))?;
                     }
-                    BigWarehouseCell::RightBox => todo!(),
-                    _ => unreachable!()
+                    Move::Up | Move::Down => {
+                        self.move_cell(mv, (x_n, y_n))?;
+                        self.move_cell(mv, (x_n + 1, y_n))?;
+                    }
                 }
             }
-        }
+            BigWarehouseCell::RightBox => {
+                match mv {
+                    Move::Right | Move::Left => {
+                        // We know these boxes can be moved, so they must be moved before the current cell.
+                        self.move_cell(mv, (x_n, y_n))?;
+                    }
+                    Move::Up | Move::Down => {
+                        self.move_cell(mv, (x_n, y_n))?;
+                        self.move_cell(mv, (x_n - 1, y_n))?;
+                    }
+                }
+            }
+        };
+        // Now do the actual move.
+        self.cells[y_n][x_n] = self.cells[y][x].clone();
+        self.cells[y][x] = BigWarehouseCell::Empty;
+        Ok(Some((x_n, y_n)))
     }
 
     fn calculate_score(&self) -> usize {
@@ -794,7 +818,9 @@ v^^>>><<^^<>>^v^<v^vv<>v^<<>^<^v^v><^<<<><<^<v><v<>vv>>v><v^<vv<>v^<<^"
         let mut warehouse = expected_warehouse.clone();
         println!("Initial configuration:\n{}", warehouse);
         for (k, mv) in expected_moves_simple.iter().enumerate() {
-            warehouse.move_robot(mv).unwrap();
+            if let Some((x, y)) = warehouse.move_cell(mv, warehouse.robot_location).unwrap() {
+                warehouse.robot_location = (x, y);
+            }
             println!("Configuration after move {} {}:\n{}", k + 1, mv, warehouse);
         }
         assert_eq!(warehouse.robot_location, expected_position_simple);
