@@ -1,9 +1,12 @@
 use anyhow::{anyhow, ensure, Result};
 use std::{
-    collections::{BinaryHeap, HashSet, LinkedList, VecDeque},
     fs,
+    fmt::Display,
     str::FromStr,
 };
+
+mod generic_search;
+use generic_search::{astar, Node};
 
 fn main() -> Result<()> {
     let input_str = fs::read_to_string("input.txt")?;
@@ -14,8 +17,8 @@ fn main() -> Result<()> {
 }
 
 fn exercise_1(input_str: &str) -> Result<usize> {
-    let mut maze = Maze::from_str(input_str)?;
-    todo!()
+    let maze = Maze::from_str(input_str)?;
+    maze.astar_path()
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -48,7 +51,7 @@ struct Maze {
     rows: usize,
     cols: usize,
     start: (usize, usize),
-    end: (usize, usize),
+    goal: (usize, usize),
 }
 
 impl FromStr for Maze {
@@ -56,7 +59,7 @@ impl FromStr for Maze {
 
     fn from_str(s: &str) -> Result<Self> {
         let mut start = None;
-        let mut end = None;
+        let mut goal = None;
         let cells = s
             .lines()
             .enumerate()
@@ -71,8 +74,8 @@ impl FromStr for Maze {
                                 start = Some((x, y));
                             }
                             Cell::End => {
-                                ensure!(end.is_none(), "Multiple end cells");
-                                end = Some((x, y));
+                                ensure!(goal.is_none(), "Multiple goal cells");
+                                goal = Some((x, y));
                             }
                             _ => {}
                         }
@@ -83,7 +86,7 @@ impl FromStr for Maze {
             .collect::<Result<Vec<_>>>()?;
 
         ensure!(start.is_some(), "No start cell");
-        ensure!(end.is_some(), "No end cell");
+        ensure!(goal.is_some(), "No goal cell");
         let rows = cells.len();
         let cols = cells[0].len();
         ensure!(
@@ -96,161 +99,160 @@ impl FromStr for Maze {
             rows,
             cols,
             start: start.unwrap(),
-            end: end.unwrap(),
+            goal: goal.unwrap(),
         })
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+impl Display for Maze {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for row in &self.cells {
+            for cell in row {
+                let c = match cell {
+                    Cell::Wall => '#',
+                    Cell::Empty => '.',
+                    Cell::Start => 'S',
+                    Cell::End => 'E',
+                };
+                write!(f, "{}", c)?;
+            }
+            writeln!(f)?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, std::hash::Hash)]
 enum Orientation {
-    Up,
-    Down,
-    Left,
-    Right,
+    North,
+    South,
+    West,
+    East,
 }
 
 impl Orientation {
     fn is_opposite(&self, other: &Self) -> bool {
         match self {
-            Self::Up => *other == Self::Down,
-            Self::Down => *other == Self::Up,
-            Self::Right => *other == Self::Left,
-            Self::Left => *other == Self::Right,
+            Self::North => *other == Self::South,
+            Self::South => *other == Self::North,
+            Self::East => *other == Self::West,
+            Self::West => *other == Self::East,
         }
+    }
+
+    fn num_rotations(&self, other: &Self) -> usize {
+        if self == other {
+            return 0;
+        }
+
+        if self.is_opposite(other) {
+            return 2;
+        }
+        1
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, std::hash::Hash)]
 struct State(Orientation, (usize, usize));
 
 impl State {
     fn x(&self) -> usize {
-        self.1.0
+        self.1 .0
     }
 
     fn y(&self) -> usize {
-        self.1.1
-    } 
+        self.1 .1
+    }
 
     fn orientation(&self) -> &Orientation {
         &self.0
     }
-    
-    fn cost(&self, other: &Self) -> Result<usize> {
+
+    fn movement_cost(&self, other: &Self) -> Result<usize> {
         if usize::abs_diff(self.x(), other.x()) > 1 || usize::abs_diff(self.y(), other.y()) > 1 {
-            return Err(anyhow!("Impossible to reach states"))
+            return Err(anyhow!("Impossible to reach states"));
         }
 
         if self.orientation().is_opposite(other.orientation()) {
-            return Err(anyhow!("Cannot flip orientation"))
+            return Err(anyhow!("Cannot flip orientation"));
         }
 
         if self.orientation() == other.orientation() {
             Ok(1)
         } else {
-            // Otherwise, must have rotated 90 degrees.
-            Ok(1_000)
+            // Otherwise, must have rotated 90 degrees _and then moved_ forward.
+            Ok(1_001)
         }
     }
-}
 
-#[derive(Debug, PartialEq, Eq, Clone)]
-struct Node {
-    state: State,
-    parent: Option<Box<Node>>,
-    cost: usize,
-    heuristic: usize,
-}
-
-impl PartialOrd for Node {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        (self.cost + self.heuristic).partial_cmp(&(other.cost + &other.heuristic))
+    fn manhattan_heuristic(&self, (x_n, y_n): (usize, usize)) -> usize {
+        usize::abs_diff(self.x(), x_n) + usize::abs_diff(self.y(), y_n)
     }
-}
 
-impl Ord for Node {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        (self.cost + self.heuristic).cmp(&(other.cost + &other.heuristic))
-    }
-}
-
-
-impl Node {
-    fn new(state: State, parent: Option<&Node>, cost: usize, heuristic: usize) -> Self {
-        Node {
-            state,
-            parent: parent.map(|p| Box::new(p.to_owned())),
-            cost,
-            heuristic,
-        }
-    }
+    // fn rotations_heuristic(&self, (x_n, y_n): (usize, usize)) -> usize {
+    //     let (x, y) = (self.x(), self.y());
+    //     match (x_n.cmp(&x), y_n.cmp(&y)) {
+    //         (Ordering::Equal, Ordering::Equal) => panic!("Should not calculate heuristic on equal cells"),
+    //         // Final orientation will 
+    //         (Ordering::Equal, Ordering::Greater) => y_n - y + 1_000 * self.orientation().num_rotations(&Orientation::Down),
+    //         (Ordering::Equal, Ordering::Less) => y - y_n + 1_000 * self.orientation().num_rotations(&Orientation::Up),
+    //         (Ordering::Greater, Ordering::Equal) => x_n - x + 1_000 * self.orientation().num_rotations(&Orientation::Right),
+    //         (Ordering::Less, Ordering::Equal) => x - x_n + 1_000 * self.orientation().num_rotations(&Orientation::Left),
+    //         _ => todo!(),
+    //     }
+    // }
 }
 
 impl Maze {
-    fn astar_paths(&self) -> Option<Node> {
-        let mut frontier = BinaryHeap::from([
-            Node::new(State(Orientation::Up, self.start), None, 0, 0),
-            Node::new(State(Orientation::Right, self.start), None, 0, 0),
-            Node::new(State(Orientation::Down, self.start), None, 0, 0),
-            Node::new(State(Orientation::Left, self.start), None, 0, 0),
-        ]);
-        let mut explored = HashSet::from([self.start]);
-        let mut paths: Vec<Node> = Vec::new();
+    fn astar_path(&self) -> Result<usize> {
+        // Define closures.
+        let successors = |state: &State| self.successors(state);
+        let goal_test = |state: &State| self.goal_test(state.x(), state.y());
+        let heuristic = |state: &State| state.manhattan_heuristic(self.goal);
+        let cost = |parent: &Node<State>, child: &State| {
+            parent.get_cost() + parent.get_state().movement_cost(child).unwrap()
+        };
 
-        while let Some(current_node) = frontier.pop_front() {
-            let (x, y) = current_node.state;
-            if self.is_goal(x, y) {
-                return Some(current_node);
-            }
-
-            self.get_successors(x, y).into_iter().for_each(|c| {
-                if explored.contains(&c) {
-                    ()
-                }
-                explored.insert(c.clone());
-                frontier.push_back(Node::new(c, Some(&current_node)));
-            });
+        if let Some(node) = astar(State(Orientation::East, self.start), goal_test, successors, heuristic, cost) {
+            // let path = node.node_to_path();
+            // println!("Path: {:?}", path);
+            return Ok(node.get_cost());
         }
-        None
+
+        Err(anyhow!("No path found"))
     }
 
-    fn is_goal(&self, x: usize, y: usize) -> bool {
-        (x, y) == self.end
+    fn goal_test(&self, x: usize, y: usize) -> bool {
+        (x, y) == self.goal
     }
 
     fn get_cell(&self, x: usize, y: usize) -> &Cell {
         &self.cells[y][x]
     }
 
-    fn get_successors(&self, state: State) -> Vec<State> {
-        let (o, (x, y)) = (state.0, state.1);
+    fn successors(&self, state: &State) -> Vec<State> {
+        let (o, (x, y)) = (&state.0, state.1);
         let mut successors = vec![];
-        if x > 0 && self.get_cell(x - 1, y).is_passable() && o != Orientation::Right {
-            successors.push(State(Orientation::Left, (x - 1, y)));
+        if x > 1 && self.get_cell(x - 1, y).is_passable() && *o != Orientation::East {
+            successors.push(State(Orientation::West, (x - 1, y)));
         }
-        if y > 0 && self.get_cell(x, y - 1).is_passable() && o != Orientation::Down {
-            successors.push(State(Orientation::Up, (x, y - 1)));
+        if y > 1 && self.get_cell(x, y - 1).is_passable() && *o != Orientation::South {
+            successors.push(State(Orientation::North, (x, y - 1)));
         }
-        if x < self.cells[0].len() - 1
+        if x < self.cells[0].len() - 2
             && self.get_cell(x + 1, y).is_passable()
-            && o != Orientation::Left
+            && *o != Orientation::West
         {
-            successors.push(State(Orientation::Right, (x + 1, y)));
+            successors.push(State(Orientation::East, (x + 1, y)));
         }
-        if y < self.cells.len() - 1
+        if y < self.cells.len() - 2
             && self.get_cell(x, y + 1).is_passable()
-            && o != Orientation::Down
+            && *o != Orientation::North
         {
-            successors.push(State(Orientation::Up, (x, y + 1)));
+            successors.push(State(Orientation::South, (x, y + 1)));
         }
         successors
     }
-}
-
-enum Move {
-    Forward,
-    RotateLeft,
-    RotateRight,
 }
 
 #[cfg(test)]
