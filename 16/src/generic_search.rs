@@ -168,3 +168,65 @@ where
     }
     None
 }
+
+pub fn astar_paths<T, F, G, H, C>(
+    initial: T,
+    goal_test: F,
+    successors: G,
+    heuristic: H,
+    cost: C,
+) -> Option<Vec<Node<T>>>
+where
+    T: Clone + Eq + std::hash::Hash,
+    F: Fn(&T) -> bool,
+    G: Fn(&T) -> Vec<T>,
+    H: Fn(&T) -> usize,
+    C: Fn(&Node<T>, &T) -> usize,
+{
+    let mut frontier = BinaryHeap::new();
+    let mut explored = HashMap::new();
+    frontier.push(Node::new(initial.clone(), None, 0, heuristic(&initial)));
+    explored.insert(initial, 0);
+
+    let mut valid_paths = Vec::new();
+
+    while let Some(current_node) = frontier.pop() {
+        if goal_test(&current_node.state) {
+            valid_paths.push(current_node);
+            continue;
+        }
+        let current_node = Rc::new(current_node);
+        successors(&current_node.state)
+            .into_iter()
+            .map(|child| (cost(&current_node, &child), child))
+            .for_each(|(new_cost, child)| match explored.entry(child.clone()) {
+                Entry::Vacant(e) => {
+                    e.insert(new_cost);
+                    let h = heuristic(&child);
+                    frontier.push(Node::new(
+                        child,
+                        Some(Rc::clone(&current_node)),
+                        new_cost,
+                        h,
+                    ));
+                }
+                Entry::Occupied(mut e) if new_cost <= *e.get() => {
+                    e.insert(new_cost);
+                    let h = heuristic(&child);
+                    frontier.push(Node::new(
+                        child,
+                        Some(Rc::clone(&current_node)),
+                        new_cost,
+                        h,
+                    ));
+                }
+                _ => {}
+            });
+    }
+
+    if valid_paths.is_empty() {
+        None
+    } else {
+        Some(valid_paths)
+    }
+}

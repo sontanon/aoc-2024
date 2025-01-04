@@ -1,24 +1,29 @@
 use anyhow::{anyhow, ensure, Result};
-use std::{
-    fs,
-    fmt::Display,
-    str::FromStr,
-};
+use std::{fmt::Display, fs, str::FromStr, collections::HashSet};
 
 mod generic_search;
-use generic_search::{astar, Node};
+use generic_search::{astar, astar_paths, Node};
 
 fn main() -> Result<()> {
     let input_str = fs::read_to_string("input.txt")?;
+    
     let result_1 = exercise_1(&input_str)?;
     println!("Exercise 1: {}", result_1);
+
+    let result_2 = exercise_2(&input_str)?;
+    println!("Exercise 2: {}", result_2);
 
     Ok(())
 }
 
 fn exercise_1(input_str: &str) -> Result<usize> {
     let maze = Maze::from_str(input_str)?;
-    maze.astar_path()
+    maze.astar_path_cost()
+}
+
+fn exercise_2(input_str: &str) -> Result<usize> {
+    let maze = Maze::from_str(input_str)?;
+    maze.astar_paths_cells()
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -188,23 +193,10 @@ impl State {
     fn manhattan_heuristic(&self, (x_n, y_n): (usize, usize)) -> usize {
         usize::abs_diff(self.x(), x_n) + usize::abs_diff(self.y(), y_n)
     }
-
-    // fn rotations_heuristic(&self, (x_n, y_n): (usize, usize)) -> usize {
-    //     let (x, y) = (self.x(), self.y());
-    //     match (x_n.cmp(&x), y_n.cmp(&y)) {
-    //         (Ordering::Equal, Ordering::Equal) => panic!("Should not calculate heuristic on equal cells"),
-    //         // Final orientation will 
-    //         (Ordering::Equal, Ordering::Greater) => y_n - y + 1_000 * self.orientation().num_rotations(&Orientation::Down),
-    //         (Ordering::Equal, Ordering::Less) => y - y_n + 1_000 * self.orientation().num_rotations(&Orientation::Up),
-    //         (Ordering::Greater, Ordering::Equal) => x_n - x + 1_000 * self.orientation().num_rotations(&Orientation::Right),
-    //         (Ordering::Less, Ordering::Equal) => x - x_n + 1_000 * self.orientation().num_rotations(&Orientation::Left),
-    //         _ => todo!(),
-    //     }
-    // }
 }
 
 impl Maze {
-    fn astar_path(&self) -> Result<usize> {
+    fn astar_path_cost(&self) -> Result<usize> {
         // Define closures.
         let successors = |state: &State| self.successors(state);
         let goal_test = |state: &State| self.goal_test(state.x(), state.y());
@@ -213,10 +205,52 @@ impl Maze {
             parent.get_cost() + parent.get_state().movement_cost(child).unwrap()
         };
 
-        if let Some(node) = astar(State(Orientation::East, self.start), goal_test, successors, heuristic, cost) {
+        if let Some(node) = astar(
+            State(Orientation::East, self.start),
+            goal_test,
+            successors,
+            heuristic,
+            cost,
+        ) {
             // let path = node.node_to_path();
             // println!("Path: {:?}", path);
             return Ok(node.get_cost());
+        }
+
+        Err(anyhow!("No path found"))
+    }
+
+    fn astar_paths_cells(&self) -> Result<usize> {
+        // Define closures.
+        let successors = |state: &State| self.successors(state);
+        let goal_test = |state: &State| self.goal_test(state.x(), state.y());
+        let heuristic = |state: &State| state.manhattan_heuristic(self.goal);
+        let cost = |parent: &Node<State>, child: &State| {
+            parent.get_cost() + parent.get_state().movement_cost(child).unwrap()
+        };
+
+        if let Some(nodes) = astar_paths(
+            State(Orientation::East, self.start),
+            goal_test,
+            successors,
+            heuristic,
+            cost,
+        ) {
+            let min_cost = nodes.iter().map(|n| n.get_cost()).min().unwrap();
+            // println!("Found a path with minimum cost {}", min_cost);
+            // let min_paths = nodes.iter().filter(|n| n.get_cost() == min_cost).count();
+            // println!("Found {} minimum paths", min_paths);
+            let cells_set: HashSet<(usize, usize)> = nodes
+                .iter()
+                .filter(|n| n.get_cost() == min_cost)
+                .flat_map(|n| 
+                    n.node_to_path()
+                    .iter()
+                    .map(|s| (s.x(), s.y()))
+                    .collect::<Vec<_>>()
+                )
+                .collect();
+            return Ok(cells_set.len());
         }
 
         Err(anyhow!("No path found"))
@@ -299,8 +333,53 @@ mod tests {
 #################",
         11048
     )]
-    fn test_solution(#[case] input: &str, #[case] expected: usize) {
+    fn test_exercise_1(#[case] input: &str, #[case] expected: usize) {
         let result = exercise_1(input).unwrap();
         assert_eq!(result, expected);
     }
+
+    #[rstest]
+    #[case(
+        "###############
+#.......#....E#
+#.#.###.#.###.#
+#.....#.#...#.#
+#.###.#####.#.#
+#.#.#.......#.#
+#.#.#####.###.#
+#...........#.#
+###.#.#####.#.#
+#...#.....#.#.#
+#.#.#.###.#.#.#
+#.....#...#.#.#
+#.###.#.#.#.#.#
+#S..#.....#...#
+###############",
+        45
+    )]
+    #[case(
+        "#################
+#...#...#...#..E#
+#.#.#.#.#.#.#.#.#
+#.#.#.#...#...#.#
+#.#.#.#.###.#.#.#
+#...#.#.#.....#.#
+#.#.#.#.#.#####.#
+#.#...#.#.#.....#
+#.#.#####.#.###.#
+#.#.#.......#...#
+#.#.###.#####.###
+#.#.#...#.....#.#
+#.#.#.#####.###.#
+#.#.#.........#.#
+#.#.#.#########.#
+#S#.............#
+#################",
+        64
+    )]
+    fn test_exercise_2(#[case] input: &str, #[case] expected: usize) {
+        let result = exercise_2(input).unwrap();
+        assert_eq!(result, expected);
+    }
 }
+
