@@ -1,11 +1,20 @@
+/// Ran until 621_696_516_096
 fn main() {
     let result_1 = exercise_1(
         vec![2, 4, 1, 1, 7, 5, 4, 6, 0, 3, 1, 4, 5, 5, 3, 0],
-        28066687,
+        28_066_687,
         0,
         0,
     );
     println!("{}", result_1);
+
+    let result_2 = exercise_2(
+        vec![2, 4, 1, 1, 7, 5, 4, 6, 0, 3, 1, 4, 5, 5, 3, 0],
+        0,
+        0,
+       500_000_000_000,
+    );
+    println!("{}", result_2);
 }
 
 struct Computer {
@@ -14,7 +23,7 @@ struct Computer {
     bx: usize,
     cx: usize,
     instruction_pointer: usize,
-    output: Vec<usize>,
+    output: Vec<u8>,
 }
 
 enum Operand {
@@ -77,7 +86,7 @@ impl Computer {
         }
     }
 
-    fn execute_instruction(&mut self, instruction: &Instruction) {
+    fn execute_instruction(&mut self, instruction: &Instruction) -> Option<u8> {
         let operand = self.get_operand(instruction);
         match instruction {
             Instruction::Adv(_) | Instruction::Bdv(_) | Instruction::Cdv(_) => {
@@ -99,17 +108,21 @@ impl Computer {
             Instruction::Jnz(_) => {
                 if self.ax != 0 {
                     self.instruction_pointer = operand;
-                    return;
+                    return None;
                 }
             }
             Instruction::Bxc => {
                 self.bx ^= self.cx;
             }
             Instruction::Out(_) => {
-                self.output.push(operand % 8);
+                let out = (operand % 8) as u8;
+                self.output.push(out);
+                self.instruction_pointer += 2;
+                return Some(out);
             }
         }
         self.instruction_pointer += 2;
+        None
     }
 
     fn valid_instruction(&self) -> bool {
@@ -133,6 +146,23 @@ impl Computer {
             .collect::<Vec<String>>()
             .join(",")
     }
+
+    fn brute_force_is_identical_program(&mut self) -> bool {
+        let mut out_cmp_idx = 0;
+        while self.valid_instruction() {
+            let instruction = Instruction::new(
+                self.tape[self.instruction_pointer],
+                self.tape[self.instruction_pointer + 1],
+            );
+            if let Some(out) = self.execute_instruction(&instruction) {
+                if out_cmp_idx >= self.tape.len() || self.tape[out_cmp_idx] != out {
+                    return false;
+                }
+                out_cmp_idx += 1;
+            }
+        }
+        (self.output.len() == self.tape.len()) && self.output == self.tape
+    }
 }
 
 fn exercise_1(tape: Vec<u8>, ax: usize, bx: usize, cx: usize) -> String {
@@ -149,9 +179,40 @@ fn exercise_1(tape: Vec<u8>, ax: usize, bx: usize, cx: usize) -> String {
     computer.print_output()
 }
 
+use rayon::prelude::*;
+
+fn exercise_2(tape: Vec<u8>, bx: usize, cx: usize, search_start: usize) -> usize {
+    const CHUNK_SIZE: usize = 128;
+
+    let chunks = (0..).map(|i| {
+        let start = search_start + (i * CHUNK_SIZE);
+        (start, start + CHUNK_SIZE)
+    });
+
+    chunks
+        .take_while(|(start, _)| *start <= usize::MAX - CHUNK_SIZE)
+        .find_map(|(chunk_start, chunk_end)| {
+            (chunk_start..chunk_end).into_par_iter().find_first(|&ax| {
+                let mut computer = Computer {
+                    tape: tape.clone(),
+                    ax,
+                    bx,
+                    cx,
+                    instruction_pointer: 0,
+                    output: Vec::with_capacity(tape.len()),
+                };
+                if ax % 1_073_741_824 == 0 {
+                    println!("{}", ax);
+                }
+                computer.brute_force_is_identical_program()
+            })
+        })
+        .expect("Solution should exist")
+}
+
 #[cfg(test)]
 mod tests {
-    use super::exercise_1;
+    use super::{exercise_1, exercise_2};
 
     #[test]
     fn test_exercise_1() {
@@ -159,5 +220,10 @@ mod tests {
             exercise_1(vec![0, 1, 5, 4, 3, 0], 729, 0, 0),
             "4,6,3,5,6,3,5,2,1,0"
         );
+    }
+
+    #[test]
+    fn test_exercise_2() {
+        assert_eq!(exercise_2(vec![0, 3, 5, 4, 3, 0], 0, 0, 1), 117440);
     }
 }
