@@ -1,4 +1,6 @@
-/// Ran until 621_696_516_096
+const MINIMUM_AX: usize = 0b101_110_001_001_000_000_000_000_000_000_000_000_000_000_000_000;
+const MAXIMUM_AX: usize = 0b101_110_001_010_000_000_000_000_000_000_000_000_000_000_000_000 - 1;
+const SEARCH_RANGE: usize = MAXIMUM_AX - MINIMUM_AX;
 fn main() {
     let result_1 = exercise_1(
         vec![2, 4, 1, 1, 7, 5, 4, 6, 0, 3, 1, 4, 5, 5, 3, 0],
@@ -9,10 +11,19 @@ fn main() {
     println!("{}", result_1);
 
     let result_2 = exercise_2(
-        vec![2, 4, 1, 1, 7, 5, 4, 6, 0, 3, 1, 4, 5, 5, 3, 0],
+        vec![
+            2, 4, // BST({4}) = BST(AX) => BX <- AX % 8
+            1, 1, // BXL(1) => BX <- BX ^ 1 
+            7, 5, // CDV({5}) = CDV(BX) => CX <- AX / 2**BX
+            4, 6, // BXC => BX <- BX ^ CX
+            0, 3, // ADV({3}) = ADV(3) => AX <- AX / 8
+            1, 4, // BXL(4) => BX <- BX ^ 4
+            5, 5, // OUT({5}) = OUT(BX) => Print BX % 8 to output.
+            3, 0  // JNX(0) => Loop to start unless AX = 0
+        ],
         0,
         0,
-       500_000_000_000,
+        MINIMUM_AX,
     );
     println!("{}", result_2);
 }
@@ -182,7 +193,7 @@ fn exercise_1(tape: Vec<u8>, ax: usize, bx: usize, cx: usize) -> String {
 use rayon::prelude::*;
 
 fn exercise_2(tape: Vec<u8>, bx: usize, cx: usize, search_start: usize) -> usize {
-    const CHUNK_SIZE: usize = 128;
+    const CHUNK_SIZE: usize = 1024;
 
     let chunks = (0..).map(|i| {
         let start = search_start + (i * CHUNK_SIZE);
@@ -192,6 +203,9 @@ fn exercise_2(tape: Vec<u8>, bx: usize, cx: usize, search_start: usize) -> usize
     chunks
         .take_while(|(start, _)| *start <= usize::MAX - CHUNK_SIZE)
         .find_map(|(chunk_start, chunk_end)| {
+            if chunk_start % 1_073_741_824 == 0 {
+                println!("Chunk start: {}", chunk_start);
+            }
             (chunk_start..chunk_end).into_par_iter().find_first(|&ax| {
                 let mut computer = Computer {
                     tape: tape.clone(),
@@ -201,9 +215,6 @@ fn exercise_2(tape: Vec<u8>, bx: usize, cx: usize, search_start: usize) -> usize
                     instruction_pointer: 0,
                     output: Vec::with_capacity(tape.len()),
                 };
-                if ax % 1_073_741_824 == 0 {
-                    println!("{}", ax);
-                }
                 computer.brute_force_is_identical_program()
             })
         })
