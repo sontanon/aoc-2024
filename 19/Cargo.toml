@@ -5,4 +5,3 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.94"
-rstest = "0.24.0"
